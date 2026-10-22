@@ -1,47 +1,67 @@
-const request = require('supertest');
-const app = require('../server');
+const express = require('express');
 
-describe('Bookstore API', () => {
-  test('GET /health returns UP', async () => {
-    const res = await request(app).get('/health');
-    expect(res.statusCode).toBe(200);
-    expect(res.body.status).toBe('UP');
-  });
+const app = express();
+app.use(express.json());
 
-  test('GET / returns the welcome page', async () => {
-    const res = await request(app).get('/');
-    expect(res.statusCode).toBe(200);
-    expect(res.text).toContain('Online Bookstore');
-  });
+// In-memory data (a real project would use a database like AWS RDS/DynamoDB)
+let books = [
+  { id: 1, title: 'Clean Code', author: 'Robert C. Martin', price: 450 },
+  { id: 2, title: 'The Pragmatic Programmer', author: 'Andrew Hunt', price: 520 },
+  { id: 3, title: 'Docker Deep Dive', author: 'Nigel Poulton', price: 399 },
+];
 
-  test('GET /books returns a list of books', async () => {
-    const res = await request(app).get('/books');
-    expect(res.statusCode).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body.length).toBeGreaterThan(0);
-  });
-
-  test('GET /books/1 returns one book', async () => {
-    const res = await request(app).get('/books/1');
-    expect(res.statusCode).toBe(200);
-    expect(res.body.id).toBe(1);
-  });
-
-  test('GET /books/999 returns 404', async () => {
-    const res = await request(app).get('/books/999');
-    expect(res.statusCode).toBe(404);
-  });
-
-  test('POST /books adds a new book', async () => {
-    const res = await request(app)
-      .post('/books')
-      .send({ title: 'Kubernetes Up & Running', author: 'Kelsey Hightower', price: 610 });
-    expect(res.statusCode).toBe(201);
-    expect(res.body.title).toBe('Kubernetes Up & Running');
-  });
-
-  test('POST /books with missing fields returns 400', async () => {
-    const res = await request(app).post('/books').send({ title: 'No author' });
-    expect(res.statusCode).toBe(400);
-  });
+// Home page
+app.get('/', (req, res) => {
+  res.send('<h1>Welcome to the Online Bookstore</h1><p>Try <a href="/books">/books</a></p>');
 });
+
+// Health check - used by Kubernetes readinessProbe
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'UP' });
+});
+
+// Get all books
+app.get('/books', (req, res) => {
+  res.json(books);
+});
+
+// Get one book by id
+app.get('/books/:id', (req, res) => {
+  const book = books.find((b) => b.id === parseInt(req.params.id, 10));
+  if (!book) return res.status(404).json({ error: 'Book not found' });
+  res.json(book);
+});
+
+// Add a new book
+app.post('/books', (req, res) => {
+  const { title, author, price } = req.body;
+  if (!title || !author || price === undefined) {
+    return res.status(400).json({ error: 'title, author and price are required' });
+  }
+  const newBook = {
+    id: books.length ? Math.max(...books.map((b) => b.id)) + 1 : 1,
+    title,
+    author,
+    price,
+  };
+  books.push(newBook);
+  res.status(201).json(newBook);
+});
+
+// Delete a book
+app.delete('/books/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const exists = books.some((b) => b.id === id);
+  if (!exists) return res.status(404).json({ error: 'Book not found' });
+  books = books.filter((b) => b.id !== id);
+  res.status(204).send();
+});
+
+const PORT = process.env.PORT || 3000;
+
+// Start the server only when run directly (not when imported by tests)
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`Bookstore running on port ${PORT}`));
+}
+
+module.exports = app;
